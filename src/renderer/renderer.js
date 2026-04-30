@@ -11,16 +11,13 @@ const state = {
   guestPreloadPath: '',
   userAgent: '',
   lastParsedUrl: '',
-  pendingAutoParse: false,
-  pendingAutoParseTimer: null,
-  pendingAutoParseExpireTimer: null,
-  pendingClickMetadata: null,
   parseSession: null,
   parserHealthTimer: null,
   activeView: 'browser'
 };
 
 let nextParseSessionId = 1;
+const latestParsedUrls = new Map();
 
 const PARSER_LOAD_TIMEOUT_MS = 12000;
 const PARSER_HEALTH_CHECK_DELAY_MS = 4500;
@@ -282,6 +279,22 @@ function formatHistoryTime(value) {
   return new Date(timestamp).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 }
 
+function historyMetaText(item, visual, timeText) {
+  const parts = [item.platformName || visual.label];
+  if (item.vodType) {
+    parts.push(item.vodType);
+  }
+  if (item.vodUpdateTo) {
+    parts.push(item.vodUpdateTo);
+  } else if (item.vodYear) {
+    parts.push(item.vodYear.replace(/^视频时长[:：]?/u, ''));
+  }
+  if (timeText) {
+    parts.push(timeText);
+  }
+  return parts.filter(Boolean).join(' · ');
+}
+
 function saveState() {
   window.superVip.saveState({
     currentInterfaceId: state.currentInterfaceId,
@@ -365,7 +378,7 @@ function renderHistory() {
     title.textContent = historyDisplayTitle(item);
     const meta = document.createElement('span');
     meta.className = 'history-meta';
-    meta.textContent = `${item.platformName || visual.label}${timeText ? ` · ${timeText}` : ''}`;
+    meta.textContent = historyMetaText(item, visual, timeText);
     copy.append(title, meta);
 
     button.append(thumb, copy);
@@ -433,27 +446,38 @@ function updateHistoryParserUrl(originalUrl, parsedUrl) {
 }
 
 function updateHistoryMetadata(originalUrl, metadata) {
+  if (metadata?.source !== 'api') {
+    return;
+  }
+
   const mediaTitle = cleanMediaTitle(metadata?.title || '', metadata?.platformName);
   const coverUrl = typeof metadata?.coverUrl === 'string' ? metadata.coverUrl : '';
   const source = metadata?.source || 'page';
+  const hasApiFields = Boolean(metadata?.type || metadata?.year || metadata?.updateTo || metadata?.description);
 
-  if (!mediaTitle && !coverUrl) {
+  if (!mediaTitle && !coverUrl && !hasApiFields) {
     return;
   }
 
   updateHistoryEntry(originalUrl, (item) => {
-    const keepClickTitle = item.mediaTitle && item.mediaTitleSource === 'click' && source !== 'click' && !mediaTitle;
-    const keepClickCover = item.coverUrl && item.coverSource === 'click' && source !== 'click';
-    const nextTitle = keepClickTitle ? item.mediaTitle : mediaTitle || item.mediaTitle;
-    const nextCoverUrl = keepClickCover ? item.coverUrl : coverUrl || item.coverUrl;
-    const nextTitleSource = nextTitle === item.mediaTitle ? item.mediaTitleSource : source;
-    const nextCoverSource = nextCoverUrl === item.coverUrl ? item.coverSource : source;
+    const nextTitle = mediaTitle;
+    const nextCoverUrl = coverUrl;
+    const nextTitleSource = nextTitle ? source : '';
+    const nextCoverSource = nextCoverUrl ? source : '';
+    const nextVodType = metadata?.type || item.vodType || '';
+    const nextVodYear = metadata?.year || item.vodYear || '';
+    const nextVodUpdateTo = metadata?.updateTo || item.vodUpdateTo || '';
+    const nextVodDesc = metadata?.description || item.vodDesc || '';
 
     if (
       item.mediaTitle === nextTitle &&
       item.coverUrl === nextCoverUrl &&
       item.mediaTitleSource === nextTitleSource &&
-      item.coverSource === nextCoverSource
+      item.coverSource === nextCoverSource &&
+      item.vodType === nextVodType &&
+      item.vodYear === nextVodYear &&
+      item.vodUpdateTo === nextVodUpdateTo &&
+      item.vodDesc === nextVodDesc
     ) {
       return item;
     }
@@ -462,89 +486,66 @@ function updateHistoryMetadata(originalUrl, metadata) {
       mediaTitle: nextTitle,
       mediaTitleSource: nextTitleSource,
       coverUrl: nextCoverUrl,
-      coverSource: nextCoverSource
+      coverSource: nextCoverSource,
+      vodType: nextVodType,
+      vodYear: nextVodYear,
+      vodUpdateTo: nextVodUpdateTo,
+      vodDesc: nextVodDesc
     };
   });
 }
 
-function normalizeClickMetadata(metadata) {
-  if (!metadata || typeof metadata !== 'object') {
-    return null;
-  }
+async function fetchApiVideoMetadata(videoUrl) {
+  const metadataUrl = `https://dmku.hls.one/?ac=list&url=${encodeURIComponent(videoUrl)}`;
+  console.info('[SuperVip] request metadata api', {
+    metadataUrl,
+    metadataRequestVideoUrl: videoUrl
+  });
 
-  const title = cleanMediaTitle(typeof metadata.title === 'string' ? metadata.title.trim() : '');
-  const coverUrl = typeof metadata.coverUrl === 'string' && /^https?:\/\//i.test(metadata.coverUrl)
-    ? metadata.coverUrl
-    : '';
-
-  if (!title && !coverUrl) {
-    return null;
-  }
-
-  return {
-    title,
-    coverUrl,
-    source: 'click'
-  };
-}
-
-function beginPendingAutoParse(message) {
-  if (!state.autoParse) {
-    return;
-  }
-
-  state.pendingAutoParse = true;
-  if (state.pendingAutoParseExpireTimer) {
-    clearTimeout(state.pendingAutoParseExpireTimer);
-  }
-  state.pendingAutoParseExpireTimer = setTimeout(() => {
-    state.pendingAutoParse = false;
-    state.pendingAutoParseExpireTimer = null;
-  }, 8000);
-
-  if (message) {
-    setStatus(message);
-  }
-}
-
-function clearPendingAutoParse() {
-  state.pendingAutoParse = false;
-  if (state.pendingAutoParseTimer) {
-    clearTimeout(state.pendingAutoParseTimer);
-    state.pendingAutoParseTimer = null;
-  }
-  if (state.pendingAutoParseExpireTimer) {
-    clearTimeout(state.pendingAutoParseExpireTimer);
-    state.pendingAutoParseExpireTimer = null;
-  }
-}
-
-function scheduleParseCurrentBrowserUrl(title = '', fallbackUrl = '', metadata = null) {
-  if (!state.autoParse || !state.pendingAutoParse) {
-    return;
-  }
-
-  if (state.pendingAutoParseTimer) {
-    clearTimeout(state.pendingAutoParseTimer);
-  }
-
-  state.pendingAutoParseTimer = setTimeout(() => {
-    const finalUrl = elements.browserView.getURL() || state.currentUrl;
-    const platformInfo = detectPlatform(finalUrl);
-    const fallbackPlatformInfo = fallbackUrl ? detectPlatform(fallbackUrl) : null;
-    const targetUrl = platformInfo ? finalUrl : fallbackUrl;
-
-    if (!platformInfo && !fallbackPlatformInfo) {
-      setStatus(`等待视频页最终地址：${finalUrl || '尚未获取到地址'}`);
-      return;
-    }
-
-    clearPendingAutoParse();
-    parseVideoUrl(targetUrl, title || state.currentTitle, true, {
-      metadata: metadata || state.pendingClickMetadata
+  const metadata = await window.superVip.fetchVideoMetadata(videoUrl).catch((error) => {
+    console.warn('[SuperVip] metadata api rejected', {
+      metadataRequestVideoUrl: videoUrl,
+      message: error?.message || String(error)
     });
-    state.pendingClickMetadata = null;
-  }, 1200);
+    return null;
+  });
+  if (!metadata || typeof metadata !== 'object') {
+    console.warn('[SuperVip] metadata api empty', {
+      metadataRequestVideoUrl: videoUrl
+    });
+    return null;
+  }
+
+  const result = {
+    title: metadata.title || '',
+    coverUrl: metadata.coverUrl || '',
+    type: metadata.type || '',
+    year: metadata.year || '',
+    updateTo: metadata.updateTo || '',
+    description: metadata.description || '',
+    episodesCount: Number.isInteger(metadata.episodesCount) ? metadata.episodesCount : 0,
+    source: 'api'
+  };
+
+  console.info('[SuperVip] metadata api mapped', {
+    metadataRequestVideoUrl: videoUrl,
+    title: result.title,
+    type: result.type,
+    updateTo: result.updateTo,
+    hasCover: Boolean(result.coverUrl),
+    episodesCount: result.episodesCount
+  });
+
+  return result;
+}
+
+function hasValidApiVideoMetadata(metadata) {
+  return Boolean(
+    metadata &&
+      metadata.source === 'api' &&
+      metadata.title &&
+      (metadata.coverUrl || metadata.updateTo || metadata.type || metadata.episodesCount > 0)
+  );
 }
 
 function nextInterfaceIndex(session) {
@@ -660,97 +661,56 @@ async function validateParserHealth(sessionId) {
   }
 }
 
-function metadataExtractionScript() {
-  return `
-    (() => {
-      const absoluteUrl = (value) => {
-        if (!value || typeof value !== 'string') return '';
-        try {
-          const url = new URL(value.trim(), location.href);
-          return /^https?:$/i.test(url.protocol) ? url.href : '';
-        } catch (_error) {
-          return '';
-        }
-      };
-      const textFrom = (selector, attribute = 'content') => {
-        const element = document.querySelector(selector);
-        const value = attribute === 'textContent' ? element?.textContent : element?.getAttribute(attribute);
-        return typeof value === 'string' ? value.replace(/\\s+/g, ' ').trim() : '';
-      };
-      const titleCandidates = [
-        textFrom('meta[property="og:title"]'),
-        textFrom('meta[name="twitter:title"]'),
-        textFrom('meta[itemprop="name"]'),
-        textFrom('h1', 'textContent'),
-        textFrom('.title', 'textContent'),
-        textFrom('[class*="title"]', 'textContent'),
-        document.title
-      ].filter(Boolean);
-      const imageSelectors = [
-        ['meta[property="og:image"]', 'content'],
-        ['meta[property="og:image:url"]', 'content'],
-        ['meta[name="twitter:image"]', 'content'],
-        ['meta[itemprop="image"]', 'content'],
-        ['link[rel="image_src"]', 'href'],
-        ['video[poster]', 'poster'],
-        ['img[alt*="海报"]', 'src'],
-        ['img[class*="cover"]', 'src'],
-        ['img[class*="poster"]', 'src'],
-        ['img[src*="cover"]', 'src'],
-        ['img[src*="poster"]', 'src']
-      ];
-      const imageCandidates = imageSelectors
-        .map(([selector, attribute]) => absoluteUrl(document.querySelector(selector)?.getAttribute(attribute)))
-        .filter(Boolean);
+async function refreshHistoryFromApi() {
+  const targets = state.history
+    .filter((item) => item.originalUrl && detectPlatform(item.originalUrl))
+    .slice(0, 20);
 
-      if (imageCandidates.length === 0) {
-        const visibleImages = Array.from(document.images)
-          .map((image) => ({
-            url: absoluteUrl(image.currentSrc || image.src),
-            area: (image.naturalWidth || image.width || 0) * (image.naturalHeight || image.height || 0)
-          }))
-          .filter((item) => item.url && item.area >= 6000)
-          .sort((first, second) => second.area - first.area);
-        if (visibleImages[0]) {
-          imageCandidates.push(visibleImages[0].url);
-        }
-      }
-
-      return {
-        title: titleCandidates[0] || '',
-        coverUrl: imageCandidates[0] || '',
-        pageUrl: location.href
-      };
-    })();
-  `;
+  for (const item of targets) {
+    const metadata = await fetchApiVideoMetadata(item.originalUrl);
+    if (!hasValidApiVideoMetadata(metadata)) {
+      continue;
+    }
+    updateHistoryMetadata(item.originalUrl, {
+      ...metadata,
+      platformName: item.platformName
+    });
+  }
 }
 
-async function enrichHistoryMetadata(sessionId) {
-  const session = state.parseSession;
-  if (!session || session.id !== sessionId || !session.shouldRemember) {
+async function rememberHistoryFromApi(videoUrl, parsedUrl, platformInfo) {
+  console.info('[SuperVip] async history metadata request', {
+    metadataRequestVideoUrl: videoUrl,
+    parseVideoUrl: videoUrl
+  });
+
+  const metadata = await fetchApiVideoMetadata(videoUrl);
+  if (!hasValidApiVideoMetadata(metadata)) {
+    console.warn('[SuperVip] async history skipped: invalid metadata', {
+      metadataRequestVideoUrl: videoUrl,
+      parseVideoUrl: videoUrl
+    });
     return;
   }
 
-  try {
-    const metadata = await elements.browserView.executeJavaScript(metadataExtractionScript(), true);
-    const currentSession = state.parseSession;
-    if (!currentSession || currentSession.id !== sessionId) {
-      return;
-    }
-
-    updateHistoryMetadata(session.originalUrl, {
-      title: metadata?.title || session.title,
-      coverUrl: metadata?.coverUrl || '',
-      platformName: session.platformName,
-      source: 'page'
-    });
-  } catch (_error) {
-    updateHistoryMetadata(session.originalUrl, {
-      title: session.title,
-      platformName: session.platformName,
-      source: 'page'
-    });
-  }
+  const currentParsedUrl = latestParsedUrls.get(videoUrl) || parsedUrl;
+  const title = cleanMediaTitle(metadata.title || '', platformInfo.platform.name);
+  rememberHistory({
+    originalUrl: videoUrl,
+    parsedUrl: currentParsedUrl,
+    title,
+    mediaTitle: title,
+    mediaTitleSource: 'api',
+    coverUrl: metadata.coverUrl || '',
+    coverSource: metadata.coverUrl ? 'api' : '',
+    platformId: platformInfo.platform.id,
+    platformName: platformInfo.platform.name,
+    vodType: metadata.type || '',
+    vodYear: metadata.year || '',
+    vodUpdateTo: metadata.updateTo || '',
+    vodDesc: metadata.description || '',
+    createdAt: new Date().toISOString()
+  });
 }
 
 function parseVideoUrl(videoUrl, title = '', shouldRemember = true, options = {}) {
@@ -762,6 +722,9 @@ function parseVideoUrl(videoUrl, title = '', shouldRemember = true, options = {}
 
   clearParserHealthTimer();
 
+  const isRetry = Boolean(options.triedInterfaceIds);
+  const apiMetadata = hasValidApiVideoMetadata(options.metadata) ? options.metadata : null;
+
   const interfaceIndex = Number.isInteger(options.interfaceIndex) ? options.interfaceIndex : 0;
   const parserInterface = interfaceAt(interfaceIndex);
   const triedInterfaceIds = Array.isArray(options.triedInterfaceIds) ? [...options.triedInterfaceIds] : [];
@@ -769,15 +732,24 @@ function parseVideoUrl(videoUrl, title = '', shouldRemember = true, options = {}
     triedInterfaceIds.push(parserInterface.id);
   }
   const parsedUrl = generateParseUrl(parserInterface.url, videoUrl);
+  latestParsedUrls.set(videoUrl, parsedUrl);
+  const metadataRequestVideoUrl = shouldRemember ? videoUrl : '';
+  console.info('[SuperVip] parse url generated', {
+    metadataRequestVideoUrl,
+    parseVideoUrl: videoUrl,
+    parserInterface: parserInterface.name,
+    parsedUrl,
+    sameRequestAndParseUrl: !metadataRequestVideoUrl || metadataRequestVideoUrl === videoUrl
+  });
   const sessionId = nextParseSessionId++;
 
   state.parseSession = {
     id: sessionId,
     originalUrl: videoUrl,
-    title,
+    title: apiMetadata?.title || title,
     shouldRemember,
     platformName: platformInfo.platform.name,
-    metadata: options.metadata || null,
+    metadata: apiMetadata,
     interfaceIndex,
     triedInterfaceIds,
     startedAt: Date.now()
@@ -789,26 +761,10 @@ function parseVideoUrl(videoUrl, title = '', shouldRemember = true, options = {}
   setStatus(`正在加载解析播放：${platformInfo.platform.name}`);
   scheduleParserHealthCheck(sessionId, PARSER_LOAD_TIMEOUT_MS);
 
-  if (shouldRemember && options.triedInterfaceIds) {
+  if (shouldRemember && isRetry) {
     updateHistoryParserUrl(videoUrl, parsedUrl);
   } else if (shouldRemember) {
-    const initialMetadata = options.metadata || {};
-    const initialTitle = initialMetadata.title || title || state.currentTitle;
-    const initialCoverUrl = initialMetadata.coverUrl || '';
-    const initialSource = initialMetadata.source || 'page';
-    rememberHistory({
-      originalUrl: videoUrl,
-      parsedUrl,
-      title: cleanMediaTitle(initialTitle, platformInfo.platform.name),
-      mediaTitle: cleanMediaTitle(initialTitle, platformInfo.platform.name),
-      mediaTitleSource: initialMetadata.title ? initialSource : 'page',
-      coverUrl: initialCoverUrl,
-      coverSource: initialCoverUrl ? initialSource : '',
-      platformId: platformInfo.platform.id,
-      platformName: platformInfo.platform.name,
-      createdAt: new Date().toISOString()
-    });
-    enrichHistoryMetadata(sessionId);
+    rememberHistoryFromApi(videoUrl, parsedUrl, platformInfo);
   }
 }
 
@@ -817,12 +773,9 @@ function handleCandidateUrl(url, title = '') {
   state.currentPlatformInfo = platformInfo;
   if (platformInfo) {
     state.detectedVideoUrl = url;
-    state.detectedVideoTitle = title || state.currentTitle;
+    state.detectedVideoTitle = '';
     state.selectedPlatformId = platformInfo.platform.id;
     setStatus(`识别到 ${platformInfo.platform.name} 视频页：${url}`);
-    if (state.pendingAutoParse && state.lastParsedUrl !== generateParseUrl(currentInterface().url, url)) {
-      scheduleParseCurrentBrowserUrl(title || state.currentTitle);
-    }
   } else {
     state.detectedVideoUrl = '';
     state.detectedVideoTitle = '';
@@ -833,13 +786,6 @@ function handleCandidateUrl(url, title = '') {
 
 function handleBrowserPopupUrl(url, title = '') {
   if (!url || !/^https?:\/\//i.test(url)) {
-    return;
-  }
-
-  const platformInfo = detectPlatform(url);
-  if (platformInfo) {
-    beginPendingAutoParse(`已打开视频页，等待最终地址：${url}`);
-    loadBrowserUrl(url, { skipImmediateDetection: true });
     return;
   }
 
@@ -885,10 +831,6 @@ function bindWebviewEvents(webview, type) {
       state.currentUrl = webview.getURL();
       elements.addressInput.value = state.currentUrl;
       handleCandidateUrl(state.currentUrl, state.currentTitle);
-      scheduleParseCurrentBrowserUrl(state.currentTitle);
-      if (state.parseSession?.shouldRemember) {
-        enrichHistoryMetadata(state.parseSession.id);
-      }
     } else {
       setStatus('解析页面已加载，正在检测播放状态。');
       if (state.parseSession) {
@@ -912,20 +854,11 @@ function bindWebviewEvents(webview, type) {
     }
   });
 
-  webview.addEventListener('will-navigate', (event) => {
-    if (type !== 'browser' || !state.autoParse || !detectPlatform(event.url)) {
-      return;
-    }
-
-    beginPendingAutoParse(`正在进入视频页，等待最终地址：${event.url}`);
-  });
-
   webview.addEventListener('did-navigate', (event) => {
     if (type === 'browser') {
       state.currentUrl = event.url;
       elements.addressInput.value = event.url;
       handleCandidateUrl(event.url);
-      scheduleParseCurrentBrowserUrl(state.currentTitle);
     }
   });
 
@@ -934,7 +867,6 @@ function bindWebviewEvents(webview, type) {
       state.currentUrl = event.url;
       elements.addressInput.value = event.url;
       handleCandidateUrl(event.url);
-      scheduleParseCurrentBrowserUrl(state.currentTitle);
     }
   });
 
@@ -954,31 +886,12 @@ function bindWebviewEvents(webview, type) {
     if (event.channel === 'candidate-link') {
       const [payload] = event.args;
       if (payload && payload.href && detectPlatform(payload.href)) {
-        const metadata = normalizeClickMetadata({
-          title: payload.text,
-          coverUrl: payload.coverUrl
-        });
-        state.pendingClickMetadata = metadata;
-        beginPendingAutoParse(`已点击视频，等待页面地址变为最终播放页：${payload.href}`);
         state.detectedVideoUrl = payload.href;
-        state.detectedVideoTitle = metadata?.title || payload.text || state.currentTitle;
+        state.detectedVideoTitle = '';
         state.currentPlatformInfo = detectPlatform(payload.href);
         state.selectedPlatformId = state.currentPlatformInfo.platform.id;
         renderDetectedState();
-        scheduleParseCurrentBrowserUrl(metadata?.title || payload.text || state.currentTitle, payload.href, metadata);
-      }
-    }
-    if (event.channel === 'page-click') {
-      const [payload] = event.args;
-      const metadata = normalizeClickMetadata({
-        title: payload?.text,
-        coverUrl: payload?.coverUrl
-      });
-      if (metadata) {
-        state.pendingClickMetadata = metadata;
-      }
-      if (state.autoParse) {
-        beginPendingAutoParse(payload?.text ? `已点击页面，等待是否进入视频页：${payload.text}` : '已点击页面，等待是否进入视频页。');
+        parseVideoUrl(payload.href, '', true);
       }
     }
     if (event.channel === 'page-ready') {
@@ -1046,7 +959,9 @@ async function init() {
   const persistedState = await window.superVip.loadState();
   state.currentInterfaceId = DEFAULT_INTERFACES[0].id;
   state.autoParse = true;
-  state.history = Array.isArray(persistedState.history) ? persistedState.history : [];
+  state.history = Array.isArray(persistedState.history)
+    ? persistedState.history.filter((item) => item.mediaTitleSource === 'api' && (!item.coverUrl || item.coverSource === 'api'))
+    : [];
   state.guestPreloadPath = await window.superVip.getGuestPreloadPath();
   state.userAgent = await window.superVip.getUserAgent();
 
@@ -1060,6 +975,7 @@ async function init() {
   renderPlatforms();
   renderInterfaces();
   renderHistory();
+  refreshHistoryFromApi();
   renderDetectedState();
   bindControls();
   bindWebviewEvents(elements.browserView, 'browser');

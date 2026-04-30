@@ -85,18 +85,6 @@ function asAbsoluteHttpUrl(value) {
   return url;
 }
 
-function srcsetToUrl(value) {
-  if (typeof value !== 'string' || !value.trim()) {
-    return '';
-  }
-
-  const candidates = value
-    .split(',')
-    .map((item) => item.trim().split(/\s+/)[0])
-    .filter(Boolean);
-  return candidates[candidates.length - 1] || '';
-}
-
 function collectUrlLikeValues(value, candidates) {
   if (typeof value !== 'string' || !value) {
     return;
@@ -143,314 +131,6 @@ function collectElementCandidates(element, candidates) {
       candidates.push(directUrl);
     }
   }
-}
-
-function comparableUrl(value) {
-  try {
-    const url = new URL(value);
-    url.hash = '';
-    return url.href.replace(/\/$/, '');
-  } catch (_error) {
-    return '';
-  }
-}
-
-function elementHasUrl(element, targetUrl) {
-  if (!element || !targetUrl) {
-    return false;
-  }
-
-  const target = comparableUrl(targetUrl);
-  const candidates = [];
-  collectElementCandidates(element, candidates);
-  return candidates.some((candidate) => comparableUrl(candidate) === target);
-}
-
-function closestLinkedElement(target, targetUrl) {
-  const element = target && target.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
-  let current = element;
-  let depth = 0;
-  while (current && current !== document.documentElement && depth < 10) {
-    if (elementHasUrl(current, targetUrl)) {
-      return current;
-    }
-    current = current.parentElement;
-    depth += 1;
-  }
-  return closestAnchor(target) || element;
-}
-
-function getClickableText(node) {
-  const element = node && node.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
-  if (!element) {
-    return '';
-  }
-
-  const titleNode = element.closest('[title],[aria-label]');
-  const title = titleNode?.getAttribute('title') || titleNode?.getAttribute('aria-label') || '';
-  return (element.innerText || title || '').trim().slice(0, 120);
-}
-
-function sanitizeTitleText(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-
-  let text = value
-    .replace(/\s+/g, ' ')
-    .replace(/[\r\n\t]/g, ' ')
-    .trim();
-
-  if (!text) {
-    return '';
-  }
-
-  text = text
-    .replace(/\s*[-_|｜—–]+及相关视频.*$/i, '')
-    .replace(/\s*[-_|｜—–]+在线观看.*$/i, '')
-    .replace(/\s*[-_|｜—–]+高清视频.*$/i, '')
-    .replace(/\s*[-_|｜—–]+高清视频.*$/i, '')
-    .replace(/\s*[-_|｜—–]+(?:iQIYI|爱奇艺|优酷|腾讯视频|芒果TV|哔哩哔哩|搜狐视频|乐视视频).*$/i, '')
-    .trim();
-
-  return text;
-}
-
-function isMeaningfulTitle(value) {
-  const text = sanitizeTitleText(value);
-  if (text.length < 2 || text.length > 40) {
-    return false;
-  }
-  if (/^(免费|vip|独播|限免|热播|推荐|最新|更多|更新至|全\d+集|\d+集全|\d+\.?\d*|[\d-]+期)$/i.test(text)) {
-    return false;
-  }
-  if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(text)) {
-    return false;
-  }
-  if (/^(限免|更新至|会员看|vip)?\d+[-~至]\d+[集期]$/i.test(text)) {
-    return false;
-  }
-  if (/^第?\d+[集期]$/.test(text)) {
-    return false;
-  }
-  if (/^(关闭弹幕|打开弹幕|弹幕|播放|暂停|全屏|退出全屏|清晰度|倍速|音量|静音)$/i.test(text)) {
-    return false;
-  }
-  if (/^(?:iQIYI|爱奇艺|优酷|腾讯视频|芒果TV|哔哩哔哩|搜狐视频|乐视视频)$/i.test(text)) {
-    return false;
-  }
-  if (/首页|关注|短视频|会员中心|排行榜|热播|频道|全网搜|开通会员/.test(text)) {
-    return false;
-  }
-  return true;
-}
-
-function textLinesFrom(element) {
-  return (element.innerText || '')
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-}
-
-function titleFromMediaAttributes(element) {
-  const nodes = [
-    ...(element.matches?.('img, a, [title], [aria-label]') ? [element] : []),
-    ...(element.querySelectorAll?.('img, a, [title], [aria-label]') || [])
-  ];
-
-  for (const node of nodes) {
-    const values = [
-      node.getAttribute('alt'),
-      node.getAttribute('title'),
-      node.getAttribute('aria-label')
-    ];
-    const title = values.find(isMeaningfulTitle);
-    if (title) {
-      return sanitizeTitleText(title);
-    }
-  }
-
-  return '';
-}
-
-function getCandidateTitle(element, fallback = '') {
-  const directLines = textLinesFrom(element).filter(isMeaningfulTitle);
-  if (directLines[0]) {
-    return directLines[0];
-  }
-
-  const mediaTitle = titleFromMediaAttributes(element);
-  if (mediaTitle) {
-    return mediaTitle;
-  }
-
-  const titleSelectors = [
-    'h1',
-    'h2',
-    'h3',
-    'h4',
-    '[class*="title"]',
-    '[class*="name"]',
-    '[class*="caption"]'
-  ];
-
-  for (const selector of titleSelectors) {
-    for (const node of element.querySelectorAll?.(selector) || []) {
-      const value = node.getAttribute('title') || node.getAttribute('aria-label') || node.textContent || '';
-      if (isMeaningfulTitle(value)) {
-        return sanitizeTitleText(value);
-      }
-    }
-  }
-
-  for (const node of element.querySelectorAll?.('[title],[aria-label]') || []) {
-    const value = node.getAttribute('title') || node.getAttribute('aria-label') || '';
-    if (isMeaningfulTitle(value)) {
-      return sanitizeTitleText(value);
-    }
-  }
-
-  return isMeaningfulTitle(fallback) ? fallback : '';
-}
-
-function getImageSource(image) {
-  return asAbsoluteHttpUrl(
-    image.currentSrc ||
-      image.getAttribute('src') ||
-      image.getAttribute('data-src') ||
-      image.getAttribute('data-original') ||
-      image.getAttribute('data-img') ||
-      srcsetToUrl(image.getAttribute('srcset') || image.getAttribute('data-srcset'))
-  );
-}
-
-function imageArea(image) {
-  const rect = image.getBoundingClientRect();
-  return Math.max(rect.width, image.naturalWidth || 0) * Math.max(rect.height, image.naturalHeight || 0);
-}
-
-function getBackgroundImageUrl(element) {
-  const style = window.getComputedStyle(element);
-  const match = style.backgroundImage && style.backgroundImage.match(/url\(["']?(.+?)["']?\)/);
-  return match ? asAbsoluteHttpUrl(match[1]) : '';
-}
-
-function getCandidateCoverUrl(element) {
-  const imageNodes = [
-    ...(element.matches?.('img') ? [element] : []),
-    ...(element.querySelectorAll?.('img') || [])
-  ];
-  const images = imageNodes
-    .map((image) => ({
-      url: getImageSource(image),
-      area: imageArea(image)
-    }))
-    .filter((item) => item.url && item.area >= 1200)
-    .sort((first, second) => second.area - first.area);
-
-  if (images[0]) {
-    return images[0].url;
-  }
-
-  let current = element;
-  let depth = 0;
-  while (current && current !== document.documentElement && depth < 4) {
-    const backgroundUrl = getBackgroundImageUrl(current);
-    if (backgroundUrl) {
-      return backgroundUrl;
-    }
-    current = current.parentElement;
-    depth += 1;
-  }
-
-  return '';
-}
-
-function candidateRootScore(element, targetUrl) {
-  const rect = element.getBoundingClientRect();
-  if (rect.width <= 0 || rect.height <= 0) {
-    return -1;
-  }
-
-  const isPageSize = rect.width > window.innerWidth * 0.85 && rect.height > window.innerHeight * 0.45;
-  if (isPageSize) {
-    return -1;
-  }
-
-  const title = getCandidateTitle(element);
-  const coverUrl = getCandidateCoverUrl(element);
-  const lineCount = textLinesFrom(element).length;
-  let score = 0;
-  if (title) score += 6;
-  if (coverUrl) score += 5;
-  if (elementHasUrl(element, targetUrl)) score += 3;
-  if (lineCount > 0 && lineCount <= 6) score += 2;
-  if (lineCount > 12) score -= 4;
-  if (rect.width <= 520 && rect.height <= 420) score += 1;
-  return score;
-}
-
-function findBestMetadataRoot(target, targetUrl = '') {
-  const linkedElement = targetUrl ? closestLinkedElement(target, targetUrl) : null;
-  const start = linkedElement || (target && target.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement);
-  let best = start;
-  let bestScore = -1;
-  let current = start;
-  let depth = 0;
-
-  while (current && current !== document.documentElement && depth < 8) {
-    const score = candidateRootScore(current, targetUrl);
-    if (score > bestScore) {
-      best = current;
-      bestScore = score;
-    }
-    current = current.parentElement;
-    depth += 1;
-  }
-
-  return best;
-}
-
-function getClickMediaMetadata(target, targetUrl = '') {
-  const element = target && target.nodeType === Node.ELEMENT_NODE ? target : target?.parentElement;
-  if (!element) {
-    return { title: '', coverUrl: '' };
-  }
-
-  const root = findBestMetadataRoot(target, targetUrl) || element;
-  const clickableText = getClickableText(root);
-  let bestTitle = isMeaningfulTitle(clickableText) ? clickableText : '';
-  let bestCoverUrl = '';
-  let current = root;
-  let depth = 0;
-  while (current && current !== document.documentElement && depth < 5) {
-    const rect = current.getBoundingClientRect();
-    const isPageSize = rect.width > window.innerWidth * 0.85 && rect.height > window.innerHeight * 0.45;
-    if (!isPageSize) {
-      const coverUrl = getCandidateCoverUrl(current);
-      const title = getCandidateTitle(current, bestTitle);
-      if (coverUrl && !bestCoverUrl) {
-        bestCoverUrl = coverUrl;
-      }
-      if (title && (!bestTitle || title.length <= bestTitle.length + 12)) {
-        bestTitle = title;
-      }
-      if (bestCoverUrl && bestTitle) {
-        return {
-          title: bestTitle,
-          coverUrl: bestCoverUrl
-        };
-      }
-    }
-
-    current = current.parentElement;
-    depth += 1;
-  }
-
-  return {
-    title: bestTitle,
-    coverUrl: bestCoverUrl
-  };
 }
 
 function findClickCandidates(target) {
@@ -1112,30 +792,24 @@ window.addEventListener(
       return;
     }
 
-    const clickMetadata = getClickMediaMetadata(event.target);
-    ipcRenderer.sendToHost('page-click', {
-      text: clickMetadata.title || getClickableText(event.target),
-      coverUrl: clickMetadata.coverUrl,
-      url: window.location.href,
-      source: 'browser-click'
-    });
+    if (!event.ctrlKey) {
+      return;
+    }
 
     const candidates = findClickCandidates(event.target);
-    if (candidates.length === 0) {
-      return;
-    }
-
     const directUrl = candidates.find(isSupportedVideoUrl);
-    if (!directUrl) {
+    const currentUrl = isSupportedVideoUrl(window.location.href) ? window.location.href : '';
+    const targetUrl = directUrl || currentUrl;
+    if (!targetUrl) {
       return;
     }
 
-    const directMetadata = getClickMediaMetadata(event.target, directUrl);
+    event.preventDefault();
+    event.stopImmediatePropagation();
+
     ipcRenderer.sendToHost('candidate-link', {
-      href: directUrl,
-      text: directMetadata.title || clickMetadata.title || getClickableText(event.target),
-      coverUrl: directMetadata.coverUrl || clickMetadata.coverUrl,
-      source: 'supported-click'
+      href: targetUrl,
+      source: directUrl ? 'ctrl-supported-click' : 'ctrl-current-page'
     });
   },
   true

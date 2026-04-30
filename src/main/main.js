@@ -60,6 +60,82 @@ async function writeState(nextState) {
   return nextState;
 }
 
+async function fetchVideoMetadata(_event, videoUrl) {
+  if (typeof videoUrl !== 'string' || !/^https?:\/\//i.test(videoUrl)) {
+    return null;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  const metadataUrl = `https://dmku.hls.one/?ac=list&url=${encodeURIComponent(videoUrl)}`;
+
+  console.info('[SuperVip] video metadata request', {
+    metadataUrl,
+    metadataRequestVideoUrl: videoUrl
+  });
+
+  try {
+    const response = await fetch(metadataUrl, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json,text/plain,*/*',
+        'User-Agent': getDesktopChromeUserAgent()
+      }
+    });
+
+    if (!response.ok) {
+      console.warn('[SuperVip] video metadata request failed', {
+        metadataRequestVideoUrl: videoUrl,
+        status: response.status,
+        statusText: response.statusText
+      });
+      return null;
+    }
+
+    const payload = await response.json();
+    if (!payload || Number(payload.vod_code) !== 200) {
+      console.warn('[SuperVip] video metadata invalid response', {
+        metadataRequestVideoUrl: videoUrl,
+        vodCode: payload?.vod_code
+      });
+      return null;
+    }
+
+    const episodes = Array.isArray(payload.vod_episodes) ? payload.vod_episodes : [];
+
+    const result = {
+      title: typeof payload.vod_title === 'string' ? payload.vod_title : '',
+      coverUrl: typeof payload.vod_pic === 'string' ? payload.vod_pic : '',
+      type: typeof payload.vod_type === 'string' ? payload.vod_type : '',
+      year: typeof payload.vod_year === 'string' ? payload.vod_year : '',
+      updateTo: typeof payload.vod_updateTo === 'string' ? payload.vod_updateTo : '',
+      description: typeof payload.vod_desc === 'string' ? payload.vod_desc : '',
+      episodesCount: episodes.length
+    };
+
+    console.info('[SuperVip] video metadata response', {
+      metadataRequestVideoUrl: videoUrl,
+      title: result.title,
+      type: result.type,
+      updateTo: result.updateTo,
+      hasCover: Boolean(result.coverUrl),
+      episodesCount: result.episodesCount
+    });
+
+    return result;
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      console.warn('[SuperVip] video metadata request error', {
+        metadataRequestVideoUrl: videoUrl,
+        message: error.message
+      });
+    }
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function sendPopupUrlToRenderer(details) {
   if (!mainWindow || mainWindow.isDestroyed()) {
     return;
@@ -182,6 +258,9 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
+  mainWindow.webContents.once('did-finish-load', () => {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  });
 }
 
 app.whenReady().then(() => {
@@ -192,6 +271,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('state:load', readState);
   ipcMain.handle('state:save', async (_event, state) => writeState({ ...DEFAULT_STATE, ...state }));
+  ipcMain.handle('video:metadata', fetchVideoMetadata);
   ipcMain.handle('path:guest-preload', () => {
     return pathToFileURL(path.join(__dirname, 'guest-preload.js')).toString();
   });

@@ -334,10 +334,10 @@ select {
 
 .history-button {
   display: grid;
-  grid-template-columns: 74px minmax(0, 1fr);
+  grid-template-columns: 58px minmax(0, 1fr);
   align-items: center;
   gap: 10px;
-  min-height: 58px;
+  min-height: 82px;
   padding: 0;
   border: 0;
 }
@@ -345,8 +345,8 @@ select {
 .history-thumb {
   display: grid;
   place-items: center;
-  width: 74px;
-  height: 48px;
+  width: 58px;
+  height: 78px;
   border-radius: 8px;
   color: rgba(15, 23, 42, 0.9);
   font-size: 10px;
@@ -370,6 +370,7 @@ select {
   width: 100%;
   height: 100%;
   object-fit: cover;
+  object-position: center;
   display: block;
 }
 
