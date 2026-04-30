@@ -258,9 +258,6 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'));
-  mainWindow.webContents.once('did-finish-load', () => {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  });
 }
 
 app.whenReady().then(() => {

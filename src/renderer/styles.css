@@ -511,6 +511,14 @@ select {
   visibility: visible;
 }
 
+.webview.inline-player-view {
+  inset: auto;
+  z-index: 5;
+  visibility: visible;
+  background: #000;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
 .empty-player {
   position: absolute;
   inset: 0;

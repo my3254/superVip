@@ -187,7 +187,7 @@ function detectPlatform(url) {
 }
 
 function generateParseUrl(interfaceUrl, videoUrl) {
-  return `${interfaceUrl}${videoUrl}`;
+  return `${interfaceUrl}${encodeURIComponent(videoUrl)}`;
 }
 
 if (typeof module !== 'undefined') {

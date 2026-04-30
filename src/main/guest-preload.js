@@ -5,6 +5,8 @@ let compiledPatterns = [];
 let clickParserEnabled = true;
 let adCleanupTimer = null;
 let parserMaintenanceStarted = false;
+let inlinePlayerTracking = false;
+let playbackRectTimer = null;
 
 const PLATFORM_HOSTS = [
   'iqiyi.com',
@@ -43,6 +45,16 @@ function compilePatterns(patterns) {
 ipcRenderer.on('click-parser-config', (_event, config = {}) => {
   clickParserEnabled = config.enabled !== false;
   compilePatterns(Array.isArray(config.patterns) ? config.patterns : []);
+});
+
+ipcRenderer.on('inline-player-tracking', (_event, config = {}) => {
+  inlinePlayerTracking = config.enabled === true;
+  if (inlinePlayerTracking) {
+    sendPlaybackRect('tracking-started');
+  } else if (playbackRectTimer) {
+    clearTimeout(playbackRectTimer);
+    playbackRectTimer = null;
+  }
 });
 
 function closestAnchor(node) {
@@ -157,6 +169,129 @@ function isSupportedVideoUrl(url) {
     return false;
   }
   return compiledPatterns.some((pattern) => pattern.test(url));
+}
+
+function pausePageMedia() {
+  for (const media of document.querySelectorAll('audio, video')) {
+    try {
+      media.autoplay = false;
+      media.pause();
+    } catch (_error) {
+      // Ignore protected or already-detached media nodes.
+    }
+  }
+}
+
+function asPlainRect(rect) {
+  const left = Math.max(0, Math.round(rect.left));
+  const top = Math.max(0, Math.round(rect.top));
+  const right = Math.min(window.innerWidth, Math.round(rect.right));
+  const bottom = Math.min(window.innerHeight, Math.round(rect.bottom));
+  return {
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top)
+  };
+}
+
+function isUsablePlayerRect(rect) {
+  const viewportArea = window.innerWidth * window.innerHeight;
+  const area = rect.width * rect.height;
+  return rect.width >= 360 &&
+    rect.height >= 200 &&
+    rect.width <= window.innerWidth &&
+    rect.height <= window.innerHeight &&
+    area <= viewportArea * 0.82;
+}
+
+function playbackSelectorList() {
+  return [
+    'video',
+    '#player',
+    '#video',
+    '#flashbox',
+    '#mod-player',
+    '#playerWrap',
+    '#player-wrapper',
+    '.player',
+    '.video-player',
+    '.player-wrapper',
+    '.player-container',
+    '.mod-player',
+    '.qy-player',
+    '.iqp-player',
+    '.iqp-root',
+    '.iqp-player-root',
+    '.m-video-player',
+    '[class*="player"]',
+    '[id*="player"]'
+  ].join(',');
+}
+
+function playerRectScore(element, rect) {
+  const area = rect.width * rect.height;
+  const ratio = rect.width / Math.max(1, rect.height);
+  const ratioScore = ratio >= 1.2 && ratio <= 2.6 ? area * 0.22 : 0;
+  const name = `${element.id || ''} ${element.className || ''}`.toLowerCase();
+  const semanticScore = /player|video|iqp|flashbox/.test(name) ? area * 0.2 : 0;
+  const mediaScore = element.tagName === 'VIDEO' ? area * 0.35 : 0;
+  const viewportScore = rect.top < window.innerHeight * 0.72 ? area * 0.12 : 0;
+  return area + ratioScore + semanticScore + mediaScore + viewportScore;
+}
+
+function findPlaybackRect() {
+  const candidates = [...new Set([...document.querySelectorAll(playbackSelectorList())])];
+  let best = null;
+
+  for (const element of candidates) {
+    if (!isVisibleElement(element)) {
+      continue;
+    }
+
+    const rect = asPlainRect(element.getBoundingClientRect());
+    if (!isUsablePlayerRect(rect)) {
+      continue;
+    }
+
+    const score = playerRectScore(element, rect);
+    if (!best || score > best.score) {
+      best = { rect, score };
+    }
+  }
+
+  return best ? best.rect : null;
+}
+
+function sendPlaybackRect(reason) {
+  if (!isMainFrame) {
+    return;
+  }
+
+  const rect = findPlaybackRect();
+  if (!rect) {
+    return;
+  }
+
+  ipcRenderer.sendToHost('playback-rect', {
+    rect,
+    reason
+  });
+}
+
+function schedulePlaybackRectUpdate(reason) {
+  if (!inlinePlayerTracking) {
+    return;
+  }
+
+  if (playbackRectTimer) {
+    clearTimeout(playbackRectTimer);
+  }
+
+  playbackRectTimer = setTimeout(() => {
+    playbackRectTimer = null;
+    sendPlaybackRect(reason);
+  }, 120);
 }
 
 function isVisibleElement(element) {
@@ -784,33 +919,49 @@ window.addEventListener('hashchange', () => sendCurrentPage('hashchange'));
 window.addEventListener(
   'click',
   (event) => {
-    if (!isMainFrame) {
-      return;
-    }
-
     if (!clickParserEnabled) {
       return;
     }
 
-    if (!event.ctrlKey) {
+    const isInlineFollowupClick = inlinePlayerTracking && !event.ctrlKey;
+    if (!event.ctrlKey && !isInlineFollowupClick) {
+      return;
+    }
+
+    if (event.ctrlKey) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pausePageMedia();
+
+      ipcRenderer.sendToHost('candidate-link', {
+        href: '',
+        useCurrentPage: true,
+        source: isMainFrame ? 'ctrl-current-page' : 'ctrl-subframe-current-page',
+        playbackRect: isMainFrame ? findPlaybackRect() : null
+      });
+      return;
+    }
+
+    if (!isMainFrame) {
       return;
     }
 
     const candidates = findClickCandidates(event.target);
     const directUrl = candidates.find(isSupportedVideoUrl);
-    const currentUrl = isSupportedVideoUrl(window.location.href) ? window.location.href : '';
-    const targetUrl = directUrl || currentUrl;
-    if (!targetUrl) {
+    const targetUrl = directUrl || '';
+    if (!targetUrl && !isInlineFollowupClick) {
       return;
     }
 
-    event.preventDefault();
-    event.stopImmediatePropagation();
+    if (isInlineFollowupClick) {
+      ipcRenderer.sendToHost('inline-followup-navigation', {
+        href: targetUrl,
+        source: 'inline-followup-click',
+        playbackRect: findPlaybackRect()
+      });
+      return;
+    }
 
-    ipcRenderer.sendToHost('candidate-link', {
-      href: targetUrl,
-      source: directUrl ? 'ctrl-supported-click' : 'ctrl-current-page'
-    });
   },
   true
 );
@@ -826,6 +977,7 @@ window.addEventListener('DOMContentLoaded', () => {
     bindVideoPauseCleanup();
     startParserMaintenance();
     scheduleAdCleanup();
+    schedulePlaybackRectUpdate('dom-mutated');
   });
   observer.observe(document.documentElement, {
     childList: true,
@@ -839,3 +991,5 @@ window.addEventListener('click', scheduleAdCleanup, true);
 window.addEventListener('pointerup', scheduleAdCleanup, true);
 window.addEventListener('keydown', scheduleAdCleanup, true);
 window.addEventListener('resize', scheduleAdCleanup, true);
+window.addEventListener('resize', () => schedulePlaybackRectUpdate('resize'), true);
+window.addEventListener('scroll', () => schedulePlaybackRectUpdate('scroll'), true);

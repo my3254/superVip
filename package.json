@@ -1,11 +1,14 @@
 {
-  "name": "super-vip-desktop",
-  "version": "0.1.0",
+  "name": "supervip",
+  "productName": "superVip",
+  "version": "1.0.1",
   "description": "Desktop video platform browser with configurable parser launch.",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "lint": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/guest-preload.js && node --check src/renderer/renderer.js && node --check src/shared/catalog.js"
+    "lint": "node --check src/main/main.js && node --check src/main/preload.js && node --check src/main/guest-preload.js && node --check src/renderer/renderer.js && node --check src/shared/catalog.js",
+    "dist:win": "electron-builder --win dir --config.win.signAndEditExecutable=false",
+    "dist:installer": "electron-builder --win nsis --config.win.signAndEditExecutable=false"
   },
   "keywords": [
     "electron",
@@ -15,7 +18,33 @@
   "author": "",
   "license": "UNLICENSED",
   "private": true,
+  "build": {
+    "appId": "com.supervip.desktop",
+    "productName": "superVip",
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "dir",
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "superVip"
+    }
+  },
   "devDependencies": {
-    "electron": "41.3.0"
+    "electron": "41.3.0",
+    "electron-builder": "^26.8.1"
   }
 }

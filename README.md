@@ -1,36 +1,59 @@
-# SuperVip Desktop
+# superVip
 
-Electron desktop app for opening supported video platform websites in an embedded browser and launching a configurable parser page for recognized video URLs.
+superVip 是一个基于 Electron 的桌面观影辅助工具，用于在内置浏览器中打开视频平台官网页面，并将支持的视频页面地址交给第三方解析接口播放。
 
-## Run
+## 功能
+
+- 支持爱奇艺、优酷、腾讯视频、芒果 TV、哔哩哔哩、搜狐视频、乐视视频。
+- 在桌面窗口内打开平台官网页面。
+- 自动识别支持的视频页面地址。
+- 支持在原网页播放区域内替换为解析播放器。
+- 支持最近解析记录。
+- 支持 Windows 安装包打包。
+
+## 安装依赖
 
 ```bash
 npm install
+```
+
+## 开发运行
+
+```bash
 npm start
 ```
 
-## Implemented
+## 使用方法
 
-- Opens supported platform home pages inside a desktop window.
-- Uses Electron 41.3.0 and sends a normal desktop Chrome User-Agent for embedded pages.
-- Supports direct URL input and simple search fallback.
-- Detects video URLs for iQiyi, Youku, Tencent Video, MGTV, Bilibili, Sohu Video, and LeTV using the rules from `E:\project\learnplugin`.
-- Captures candidate video links clicked inside the platform webview through an isolated preload script.
-- Generates parser URLs as:
+1. 启动软件后，在左侧选择要打开的视频平台。
+2. 在平台官网中进入具体视频播放页面。
+3. 按住 `Ctrl` 并单击页面任意区域，软件会使用当前官网视频页地址生成解析地址。
+4. 解析播放器会覆盖到原网页的视频播放区域，页面其他内容保持不变。
+5. 已经完成一次 `Ctrl + 单击` 替换后，在同一个页面内切换集数时，软件会等待官网页面加载完成，再自动替换为新一集的解析播放地址。
+6. 如果当前解析线路失败，软件会自动尝试备用解析线路。
 
-```text
-parserInterfaceUrl + encodeURIComponent(originalVideoPageUrl)
+## 打包
+
+生成 Windows 目录版：
+
+```bash
+npm run dist:win
 ```
 
-- Loads the parser URL in a separate desktop webview.
-- Persists selected parser interface, auto-parse setting, and recent parse history in Electron `userData`.
+生成 Windows 安装包：
 
-## Limits
+```bash
+npm run dist:installer
+```
 
-This app does not decrypt, crack, scrape, or extract real media stream URLs. It only opens official platform pages and launches third-party parser pages with the current video page URL. Parser availability, legality, privacy, login behavior, and playback success depend on the selected external parser and the platform page itself.
+打包产物默认输出到 `dist/` 目录。
 
-Use it only for content you are authorized to access.
+## 版本
 
-## iQiyi Browser Prompt
+当前版本：`1.0.1`
 
-If iQiyi shows a browser upgrade/client prompt, this project now removes the Electron marker from the User-Agent and upgrades Electron to 41.3.0. That can help with browser-version checks, but iQiyi can still require its official client or DRM/media capabilities that embedded Chromium does not provide.
+## 说明
+
+本项目不会解密、破解、抓取或提取真实媒体流地址。软件只负责打开官方页面，并把当前视频页面地址交给配置的第三方解析接口。
+
+解析是否可用、是否合法、是否需要登录、播放是否成功，取决于平台页面和第三方解析接口本身。请只在你有权访问的内容范围内使用。
