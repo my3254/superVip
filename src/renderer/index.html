@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; connect-src 'self';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SuperVip Desktop</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SV</div>
+          <div>
+            <div class="brand-name">SuperVip</div>
+            <div class="brand-subtitle">聚合观影助手</div>
+          </div>
+        </div>
+
+        <section class="sidebar-section">
+          <div class="section-heading">
+            <span class="section-heading-icon">▦</span>
+            <span>站点列表</span>
+          </div>
+          <nav class="platform-list" id="platformList"></nav>
+        </section>
+
+        <section class="sidebar-section parser-panel" hidden>
+          <div class="section-heading">
+            <span class="section-heading-icon">▦</span>
+            <span>解析服务</span>
+          </div>
+          <select id="interfaceSelect" class="select"></select>
+          <button id="parseCurrentButton" class="primary-button" type="button" disabled>解析当前页面</button>
+          <label class="switch-row">
+            <input id="autoParseToggle" type="checkbox" />
+            <span>打开视频页后自动识别</span>
+          </label>
+        </section>
+
+        <section class="sidebar-section history-panel">
+          <div class="section-heading history-heading">
+            <span>最近解析</span>
+            <button class="more-button" type="button" tabindex="-1">更多 ›</button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+          <button id="clearHistoryButton" class="clear-history-button" type="button">清空记录</button>
+        </section>
+      </aside>
+
+      <main class="workspace">
+        <header class="toolbar">
+          <div class="nav-controls">
+            <button id="backButton" class="tool-button" type="button" title="后退">‹</button>
+            <button id="forwardButton" class="tool-button" type="button" title="前进">›</button>
+            <button id="reloadButton" class="tool-button" type="button" title="刷新">↻</button>
+          </div>
+          <form id="addressForm" class="address-form">
+            <input id="addressInput" class="address-input" type="text" spellcheck="false" />
+            <button class="go-button" type="submit">打开</button>
+          </form>
+          <div class="view-tabs" role="tablist">
+            <button id="browserTab" class="tab-button is-active" type="button">官网</button>
+            <button id="playerTab" class="tab-button" type="button">解析播放</button>
+          </div>
+        </header>
+
+        <section id="statusBar" class="status-bar">
+          <span id="statusText">请选择平台或输入网址。</span>
+          <span id="detectedBadge" class="detected-badge is-hidden"></span>
+        </section>
+
+        <section class="content-area">
+          <webview id="browserView" class="webview is-active" allowpopups></webview>
+          <webview id="playerView" class="webview" allowpopups></webview>
+          <div id="emptyPlayer" class="empty-player">
+            <div class="empty-title">还没有解析播放内容</div>
+            <div class="empty-text">打开平台官网，进入支持的视频页后会在这里加载解析页面。</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="../shared/catalog.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

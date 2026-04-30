@@ -1,0 +1,9 @@
+{
+  "name": "SuperVip Mobile",
+  "short_name": "SuperVip",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0f14",
+  "theme_color": "#0d1117",
+  "orientation": "portrait-primary"
+}

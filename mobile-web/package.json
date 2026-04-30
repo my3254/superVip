@@ -1,0 +1,11 @@
+{
+  "name": "supervip-mobile-web",
+  "version": "0.1.0",
+  "description": "Standalone mobile web version of SuperVip for local LAN use on iPhone Safari.",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "node server.js",
+    "lint": "node --check server.js && node --check app.js && node --check catalog.js"
+  }
+}
